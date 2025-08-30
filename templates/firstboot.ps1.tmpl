@@ -1,0 +1,18 @@
+# Enable OpenSSH
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+Start-Service sshd
+Set-Service sshd -StartupType Automatic
+New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 | Out-Null
+
+# Enable Containers feature
+Enable-WindowsOptionalFeature -Online -FeatureName Containers -All -NoRestart | Out-Null
+
+# Install Docker engine (Windows)
+Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+Install-Module -Name DockerMsftProvider -Repository PSGallery -Force | Out-Null
+Install-Package -Name docker -ProviderName DockerMsftProvider -Force | Out-Null
+Set-Service docker -StartupType Automatic
+
+# Reboot to finalize
+Restart-Computer
+

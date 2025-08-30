@@ -44,3 +44,28 @@ nano .env   # edit settings (bridge, RAM, etc.)
 - `./bin/vmctl.sh ip` — show VM IPs
 
 - `./bin/vmctl.sh ssh` — connect to VM
+
+# First run checklist
+
+# 1) install host deps (first time only)
+./bin/provision_host.sh
+
+# 2) configure
+cp .env.example .env
+nano .env   # adjust VM_BRIDGE, RAM/CPU, etc.
+
+# 3) put the Windows Server ISO
+cp ~/Downloads/Windows_Server_2022.iso artifacts/iso/
+
+# 4) generate Autounattend
+./bin/gen_autounattend.sh
+
+# 5) bring up VM (hands-off install)
+./bin/vmctl.sh up
+
+# 6) get the IP (wait 1–2 mins after first boot)
+./bin/vmctl.sh ip
+
+# 7) SSH in
+./bin/vmctl.sh ssh
+
