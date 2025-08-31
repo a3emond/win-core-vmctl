@@ -1,71 +1,168 @@
-# win-core-vmctl
+# Windows VM on KVM/Libvirt (with Bridged Networking)
 
-CLI tool to create and manage a **headless Windows Server Core VM** on Linux (KVM/libvirt).
-Use it to run **ASP.NET .NET Framework** builds in Windows containers without a GUI.
+This project provisions a Windows Server VM on Linux (Pop!_OS / Ubuntu) using KVM + QEMU + libvirt, with **bridged networking** so the VM appears as a separate machine on the LAN.
 
-## Quickstart
+---
+
+## 1. Bridge Setup (Host Networking)
+
+We configure a bridge (`br0`) so the VM has a LAN IP from the router:
 
 ```bash
-git clone https://github.com/you/win-core-vmctl.git
-cd win-core-vmctl
+# Create the bridge
+sudo nmcli connection add type bridge ifname br0 con-name br0
 
-# 1. Install dependencies
+# Attach your physical NIC (example: enp2s0)
+sudo nmcli connection add type bridge-slave ifname enp2s0 master br0
+
+# Bring bridge up
+sudo nmcli connection up br0
+sudo nmcli connection up bridge-slave-enp2s0
+
+# Assign static/manual IP to host via bridge (adjust values as needed)
+sudo nmcli connection modify br0 ipv4.method manual \
+  ipv4.addresses 192.168.8.11/24 \
+  ipv4.gateway 192.168.8.1 \
+  ipv4.dns 192.168.8.1
+
+# Enable autoconnect at boot
+sudo nmcli connection modify br0 connection.autoconnect yes
+sudo nmcli connection modify bridge-slave-enp2s0 connection.autoconnect yes
+```
+
+Check bridge state:
+
+```bash
+ip addr show br0
+```
+
+---
+
+## 2. QEMU Bridge Helper Setup
+
+QEMU requires explicit permission to attach to bridges.
+
+```bash
+# Create config directory and allow br0
+sudo mkdir -p /etc/qemu
+echo "allow br0" | sudo tee /etc/qemu/bridge.conf
+```
+
+Fix helper permissions:
+
+```bash
+sudo chgrp kvm /usr/lib/qemu/qemu-bridge-helper
+sudo chmod u+s /usr/lib/qemu/qemu-bridge-helper
+sudo chmod 4750 /usr/lib/qemu/qemu-bridge-helper
+```
+
+Verify:
+
+```bash
+ls -l /usr/lib/qemu/qemu-bridge-helper
+# Should look like: -rwsr-x--- 1 root kvm ...
+```
+
+Ensure user is in `kvm` and `libvirt` groups:
+
+```bash
+groups $USER
+sudo usermod -aG kvm,libvirt $USER
+# Then log out & back in
+```
+
+---
+
+## 3. Project Scripts Overview
+
+- **`bin/provision_host.sh`** → Installs required host packages (`qemu`, `libvirt`, `virt-install`, `genisoimage`).
+  
+- **`bin/detect_host.sh`** → Verifies environment (kernel, bridge, dependencies).
+  
+- **`bin/gen_autounattend.sh`** → Builds `Autounattend.iso` with XML + PowerShell firstboot provisioning.
+  
+- **`bin/vmctl.sh`** → Main VM lifecycle manager.
+  
+
+All scripts need execution permission:
+
+```bash
+chmod +x bin/*.sh
+```
+
+---
+
+## 4. Workflow
+
+### Initial Provisioning
+
+```bash
+# Install KVM + dependencies
 ./bin/provision_host.sh
 
-# 2. Copy Windows ISO
-cp ~/Downloads/Windows_Server_2022.iso artifacts/iso/
+# Verify environment
+./bin/detect_host.sh
 
-# 3. Configure
-cp .env.example .env
-nano .env   # edit settings (bridge, RAM, etc.)
-
-# 4. Generate Autounattend ISO
+# Generate unattended ISO for Windows setup
 ./bin/gen_autounattend.sh
 
-# 5. Bring up VM
+# Create disk and start installation
 ./bin/vmctl.sh up
+```
 
-# 6. Get IP
-./bin/vmctl.sh ip
+---
 
-# 7. SSH into Windows Core
-./bin/vmctl.sh ssh
+### Managing the VM
 
-# Commands
+```bash
+./bin/vmctl.sh start    # Start VM
+./bin/vmctl.sh stop     # Graceful shutdown
+./bin/vmctl.sh destroy  # Delete domain + disk + autounattend
+./bin/vmctl.sh ip       # Show VM’s LAN IP
+./bin/vmctl.sh ssh      # SSH into VM as Administrator
+```
 
-- `./bin/vmctl.sh up` — create & start VM (idempotent)
+---
 
-- `./bin/vmctl.sh start` — start VM
+## 5. Monitoring Installation
 
-- `./bin/vmctl.sh stop` — shutdown VM
+- Check VM state:
+  
+  ```bash
+  virsh list --all
+  ```
+  
+- Attach console:
+  
+  ```bash
+  virsh console win-core-2022
+  # Exit: Ctrl+]
+  ```
+  
+- Get VNC display:
+  
+  ```bash
+  virsh vncdisplay win-core-2022
+  # Example output: :0 → connect with vncviewer localhost:5900
+  ```
+  
 
-- `./bin/vmctl.sh destroy` — delete VM + disk
+---
 
-- `./bin/vmctl.sh ip` — show VM IPs
+## 6. Notes
 
-- `./bin/vmctl.sh ssh` — connect to VM
+- VM disk stored under: `artifacts/images/win-core-2022.qcow2`
+  
+- Autounattend ISO under: `artifacts/autounattend/win-core-2022-autounattend.iso`
+  
+- VM appears as a **separate host on the LAN** (e.g., `192.168.8.xxx`).
+  
+- After install, connect with:
+  
+  ```bash
+  ssh Administrator@<VM_IP>
+  ```
+  
 
-# First run checklist
-
-# 1) install host deps (first time only)
-./bin/provision_host.sh
-
-# 2) configure
-cp .env.example .env
-nano .env   # adjust VM_BRIDGE, RAM/CPU, etc.
-
-# 3) put the Windows Server ISO
-cp ~/Downloads/Windows_Server_2022.iso artifacts/iso/
-
-# 4) generate Autounattend
-./bin/gen_autounattend.sh
-
-# 5) bring up VM (hands-off install)
-./bin/vmctl.sh up
-
-# 6) get the IP (wait 1–2 mins after first boot)
-./bin/vmctl.sh ip
-
-# 7) SSH in
-./bin/vmctl.sh ssh
+---
 
